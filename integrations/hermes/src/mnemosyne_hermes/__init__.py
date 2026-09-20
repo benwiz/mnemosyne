@@ -1602,6 +1602,19 @@ class MnemosyneMemoryProvider(HermesPersonaPromptMixin, MemoryProvider):
             )
         return ""
 
+    @staticmethod
+    def select_prompt_recall(records, *, query: str = "", task_id: str = "", limit: int = 24):
+        """Apply provider-boundary validity/type filtering before prompt assembly."""
+        from .recall_policy import select_recall
+
+        selected = select_recall(records, query=query, task_id=task_id, limit=limit)
+        by_text = {
+            str(item.get("text") or item.get("content") or ""): item
+            for item in records
+            if isinstance(item, dict)
+        }
+        return [by_text.get(item.text, {"content": item.text}) for item in selected]
+
     def prefetch(self, query: str, *, session_id: str = "") -> str:
         """Recall relevant context via Mnemosyne hybrid search with temporal weighting.
         
@@ -1690,7 +1703,9 @@ class MnemosyneMemoryProvider(HermesPersonaPromptMixin, MemoryProvider):
             if canonical_rows:
                 filtered.extend(canonical_rows)
             filtered.sort(key=_prefetch_adjusted_score, reverse=True)
-            filtered = _semantic_dedup_prefetch(filtered)[:_PREFETCH_TOP_K]
+            filtered = self.select_prompt_recall(
+                _semantic_dedup_prefetch(filtered), query=query, limit=_PREFETCH_TOP_K
+            )
             if not filtered:
                 return ""
             lines = ["## Mnemosyne Context"]
